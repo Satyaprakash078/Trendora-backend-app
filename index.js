@@ -5,6 +5,7 @@ const app=express();
 require('dotenv').config();
 const cookieParser=require('cookie-parser');
 const bodyParser=require('body-parser');
+const Redis = require('ioredis');  
 const Port=process.env.PORT || 5000;
 
 //middleware setup
@@ -18,12 +19,21 @@ app.use(cors({
     credentials: true
 }))
 
+// connect to redis
+const redis = new Redis(process.env.REDIS_URL);
+redis.on("connect", () => {
+    console.log("✅ Connected to Redis");
+});
+redis.on("error", (err) => {
+    console.error("❌ Redis connection error:", err);
+});
+
 //image upload
 const uploadImage = require('./src/utils/uploadImage')
 
 //all routes
 const authRoutes= require('./src/users/user.routes');
-const productRoutes=require('./src/products/products.routes')
+const productRoutes=require('./src/products/products.routes')(redis);
 const reviewRoutes=require('./src/reviews/reviews.routes')
 const orderRoutes=require('./src/orders/orders.routes')
 const statsRoutes=require('./src/stats/stats.routes')

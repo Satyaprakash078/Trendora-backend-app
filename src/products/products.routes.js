@@ -4,6 +4,7 @@ const ReviewModel = require('../reviews/reviews.model');
 const verifyToken = require('../middleware/verifyToken');
 const verifyAdmin = require('../middleware/verifyAdmin');
 
+module.exports = function (redis) {
 const router=express.Router();
 
 //create a product
@@ -20,6 +21,9 @@ const router=express.Router();
             savedProduct.rating=averageRating;
             await savedProduct.save();
         }
+        // clear product caches
+            await redis.del("all_products");
+
         res.status(201).send(savedProduct);
     } catch (error) {
         console.log("Failled to create new roduct",error);
@@ -29,6 +33,13 @@ const router=express.Router();
   //get all products
   router.get('/',async (req,res)=>{
     try {
+        //  try cache first
+            const cachedProducts = await redis.get("all_products");
+            if (cachedProducts) {
+                console.log(" Serving products from cache");
+                return res.status(200).send(JSON.parse(cachedProducts));
+            }
+
          const {category,color,minPrice,maxPrice,page=1,limit=10}=req.query;
          let filter={};
          if(category && category !== "all"){
@@ -53,7 +64,13 @@ const router=express.Router();
                                         .limit(parseInt(limit))
                                         .populate('author',"email")
                                         .sort({createdAt:-1})
-        res.status(200).send({products,totalPages,totalProducts})
+
+         const response= {products,totalPages,totalProducts};
+
+         //  save to cache (30 sec expiry)
+            await redis.set("all_products", JSON.stringify(response), "EX", 30);
+
+            res.status(200).send(response);
 
     } catch (error) {
         console.log("Failled in feching products",error);
@@ -63,18 +80,28 @@ const router=express.Router();
   //get a single product
   router.get('/:id',async (req,res)=>{
     try {
-        console.log("Product ID:", req.params.id);
+      //  console.log("Product ID:", req.params.id);
         const productId= req.params.id;
         if (!productId || productId === 'undefined') {
             return res.status(400).send({ message: "Product ID is required" });
         }
+        // check cache
+            const cachedProduct = await redis.get(`product_${productId}`);
+            if (cachedProduct) {
+                console.log(" Serving product from cache");
+                return res.status(200).send(JSON.parse(cachedProduct));
+            }
         const product=await ProductModel.findById(productId).populate('author',"username email");
         if(!product){
             return res.status(404).send({message:"Product not found"})
         }
-        const review =await ReviewModel.find({productId}).populate("userId","username email");
-       console.log(review)
-        res.status(200).send({product,reviews:review})
+        const reviews =await ReviewModel.find({productId}).populate("userId","username email");
+         const response = { product, reviews };
+        // cache for 1 min
+            await redis.set(`product_${productId}`, JSON.stringify(response), "EX", 60);
+            
+       console.log(reviews)
+        res.status(200).send(response);
 
     } catch (error) {
         console.log("Failled in fetching the product",error);
@@ -92,6 +119,10 @@ const router=express.Router();
         if(!updateProduct){
             return res.status(404).send({message:"Product not found"})
         }
+        //  clear caches
+            await redis.del("all_products");
+            await redis.del(`product_${productId}`);
+
         res.status(200).send(
             {message:"Product updated successfully",updateProduct})
     } catch (error) {
@@ -109,6 +140,10 @@ const router=express.Router();
          }
          //delete reviews  related to tht product
          await ReviewModel.deleteMany({productId});
+         // clear caches
+            await redis.del("all_products");
+            await redis.del(`product_${productId}`);
+
          res.status(200).send({message:"Product deleted successfully"})
     } catch (error) {
         console.log("Failled in deleting the product",error);
@@ -148,4 +183,6 @@ const router=express.Router();
         res.status(500).send({message:"Failled in getting the related products"})
     }
   })
- module.exports=router;
+  return router;
+ 
+}
