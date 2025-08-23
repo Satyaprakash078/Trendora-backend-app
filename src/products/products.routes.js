@@ -78,27 +78,27 @@ const router=express.Router();
     }
   })
   //get a single product
-  router.get('/:id',async (req,res)=>{
+  router.get('/:slug',async (req,res)=>{
     try {
       //  console.log("Product ID:", req.params.id);
-        const productId= req.params.id;
-        if (!productId || productId === 'undefined') {
-            return res.status(400).send({ message: "Product ID is required" });
+        const { slug } = req.params;
+       if (!slug || slug === 'undefined') {
+             return res.status(400).send({ message: "Product slug is required" });
         }
         // check cache
-            const cachedProduct = await redis.get(`product_${productId}`);
+            const cachedProduct = await redis.get(`product_${slug}`);
             if (cachedProduct) {
                 console.log(" Serving product from cache");
                 return res.status(200).send(JSON.parse(cachedProduct));
             }
-        const product=await ProductModel.findById(productId).populate('author',"username email");
+        const product = await ProductModel.findOne({ slug }).populate('author',"username email");
         if(!product){
             return res.status(404).send({message:"Product not found"})
         }
-        const reviews =await ReviewModel.find({productId}).populate("userId","username email");
+       const reviews = await ReviewModel.find({ productId: product._id }).populate("userId","username email");
          const response = { product, reviews };
         // cache for 1 min
-            await redis.set(`product_${productId}`, JSON.stringify(response), "EX", 60);
+           await redis.set(`product_${slug}`, JSON.stringify(response), "EX", 60);
             
        console.log(reviews)
         res.status(200).send(response);
